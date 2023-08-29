@@ -83,10 +83,10 @@ async function findRoundFolder(auth) {
   return res.data.files[0].id;
 }
 
-async function findImg(auth, author, folder) {
+async function findFile(auth, file_name, folder) {
   const service = google.drive({version: 'v3', auth});
   const res = await service.files.list({
-    q: `name='${author}.png' and '${folder}' in parents`,
+    q: `name='${file_name}' and '${folder}' in parents`,
     fields: 'files(id, name)',
     spaces: "drive",
   });
@@ -100,25 +100,25 @@ async function deleteFile(auth, file_id) {
   });
 }
 
-async function uploadImg(auth, author, img_path, folder) {
-  const existing_files = await findImg(auth, author, folder);
+async function uploadFile(auth, file_name, src_file_path, folder, mime) {
+  const existing_files = await findFile(auth, file_name, folder);
   for (const file of existing_files) {
-    console.log(`deleting img ${file.id}`);
+    console.log(`deleting file ${file_name}`);
     await deleteFile(auth, file.id);
   }
-  if (!_fs.existsSync(img_path)) {
-    console.log(`${img_path} does not exist, skip img uploading`);
+  if (!_fs.existsSync(src_file_path)) {
+    console.log(`${src_file_path} does not exist, skip file uploading`);
     return
   }
   const service = google.drive({version: 'v3', auth});
   const requestBody = {
-    name: `${author}.png`,
+    name: `${file_name}`,
     parents: [folder],
     fields: 'id',
   };
   const media = {
-    mimeType: 'image/png',
-    body: _fs.createReadStream(img_path),
+    mimeType: mime,
+    body: _fs.createReadStream(src_file_path),
   };
   const file = await service.files.create({
     requestBody,
@@ -137,14 +137,14 @@ async function findExePath(dir) {
   throw `couldn't find exe file in ${dir}`
 }
 
-async function shareImg(auth, img_id) {
+async function shareFile(auth, file_id) {
   const service = google.drive({version: 'v3', auth});
   const result = await service.permissions.create({
     resource: {
       type: 'anyone',
       role: 'reader',
     },
-    fileId: img_id,
+    fileId: file_id,
   });
 }
 
@@ -166,6 +166,13 @@ async function updateValues(auth, row_id, time, img_uri, stdout) {
   });
 }
 
+async function readFile(path) {
+  const f = await fs.open(path, 'r');
+  const result = await f.readFile({encoding: 'utf8'});
+  await f.close();
+  return result;
+}
+
 async function main() {
   if (!args.author) {
     throw "author is not specified";
@@ -185,6 +192,7 @@ async function main() {
 
   const tmp_unpacked_dir = path.join(TMP_DIR, "zip_unpacked");
   const out_png = path.join(TMP_DIR, "output.png");
+  const out_txt = path.join(TMP_DIR, "output.txt");
 
   execSync(`rmdir ${TMP_DIR} /s /q`)
   execSync(`mkdir ${tmp_unpacked_dir}`)
@@ -192,25 +200,33 @@ async function main() {
   const exe = await findExePath(tmp_unpacked_dir);
   console.log(`exe = ${exe}`);
 
+  const txt_file = await fs.open(out_txt, 'w');
   const start = process.hrtime();
   const res = spawnSync(exe, ["--in", GLTF_PATH, "--out", out_png, "--height", 1080], {
+    stdio: [null, txt_file, txt_file],
     cwd: tmp_unpacked_dir,
     timeout: TIMEOUT,
   });
   const duration = process.hrtime(start);
+  await txt_file.close();
 
   const time = pretty(duration, 'ms');
   console.log(`time = ${time}`);
-  const stdout = `stdout: \n${res.stdout}\nstderr:\n${res.stderr}`
+  var stdout = await readFile(out_txt)
   console.log(`${stdout}`);
 
-  const img_id = await uploadImg(auth, args.author, out_png, round_folder);
-  console.log(`img_id = ${img_id}`);
+  const img_id = await uploadFile(auth, `${args.author}.png`, out_png, round_folder, 'image/png');
+  const zip_id = await uploadFile(auth, `${args.author}.zip`, args.zip, round_folder, 'application/zip');
+  const txt_id = await uploadFile(auth, `${args.author}.txt`, out_txt, round_folder, 'text/plain');
 
-  await shareImg(auth, img_id);
+  await shareFile(auth, img_id);
 
   const img_uri = `https://drive.google.com/uc?export=download&id=${img_id}`
   console.log(`img_uri = ${img_uri}`);
+
+  if (stdout.split(/\r\n|\r|\n/).length > 35) {
+    stdout = `https://drive.google.com/file/d/${txt_id}/view?usp=drive_link`;
+  }
 
   await updateValues(auth, row_id, time, img_uri, stdout);
 
