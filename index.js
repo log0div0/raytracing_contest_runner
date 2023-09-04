@@ -110,6 +110,7 @@ async function uploadFile(auth, file_name, src_file_path, folder, mime) {
     console.log(`${src_file_path} does not exist, skip file uploading`);
     return
   }
+  console.log(`uploading file ${file_name} ...`);
   const service = google.drive({version: 'v3', auth});
   const requestBody = {
     name: `${file_name}`,
@@ -148,11 +149,12 @@ async function shareFile(auth, file_id) {
   });
 }
 
-async function updateValues(auth, row_id, time, img_uri, stdout) {
+async function updateValues(auth, row_id, time, img_val, stdout) {
+  console.log("updating cells in the table ...");
   const service = google.sheets({version: 'v4', auth});
   let values = [
     [
-      time, `=image("${img_uri}")`, stdout
+      time, img_val, stdout
     ],
     // Additional rows ...
   ];
@@ -207,6 +209,7 @@ async function main() {
     cwd: tmp_unpacked_dir,
     timeout: TIMEOUT,
   });
+  console.log(res);
   const duration = process.hrtime(start);
   await txt_file.close();
 
@@ -219,16 +222,21 @@ async function main() {
   const zip_id = await uploadFile(auth, `${args.author}.zip`, args.zip, round_folder, 'application/zip');
   const txt_id = await uploadFile(auth, `${args.author}.txt`, out_txt, round_folder, 'text/plain');
 
-  await shareFile(auth, img_id);
-
-  const img_uri = `https://drive.google.com/uc?export=download&id=${img_id}`
-  console.log(`img_uri = ${img_uri}`);
+  var img_val = null;
+  if (img_id) {
+    await shareFile(auth, img_id);
+    const img_uri = `https://drive.google.com/uc?export=download&id=${img_id}`
+    console.log(`img_uri = ${img_uri}`);
+    img_val = `=image("${img_uri}")`
+  } else {
+    img_val = `Program produces no output image. Exit code = 0x${res.status.toString(16)}`
+  }
 
   if (stdout.split(/\r\n|\r|\n/).length > 35) {
     stdout = `https://drive.google.com/file/d/${txt_id}/view?usp=drive_link`;
   }
 
-  await updateValues(auth, row_id, time, img_uri, stdout);
+  await updateValues(auth, row_id, time, img_val, stdout);
 
   console.log("DONE!");
 }
