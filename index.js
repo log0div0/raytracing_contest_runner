@@ -11,15 +11,30 @@ const pretty = require('pretty-time');
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'];
 const TOKEN_PATH = path.join(process.cwd(), 'token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
-const SPREADSHEET_ID = "1k7h9KQ1si7DteOdsXfPLhLCJ6n7bmrHz2ZaJNL8kWLY";
+const SPREADSHEET_ID = "1wz3JtUW83_rPdbTjTbjK2NLrk77NiNBL4P3-_k5L7-8";
 const GDRIVE_FOLDER_ID = "18z2d1Wu8kheNawx6D6BsTG3os5dAuR_R";
-const ROUND_ID = "Round 0";
+const ROUND_ID = "Round 1";
 const TMP_DIR = "C:\\Users\\log0div0\\work\\tmp";
-const GLTF_PATH = "C:\\Users\\log0div0\\work\\zig_raytracing_contest\\models\\Duck.glb";
+const GLTF_PATH = "C:\\Users\\log0div0\\work\\raytracing_contest_models\\Round1\\high-res.glb";
+const TESTS_PATH = "C:\\Users\\log0div0\\work\\raytracing_contest_models\\Tests"
 const second = 1000;
 const minute = 60 * second;
 const hour = 60 * minute;
 const TIMEOUT = hour;
+
+const CAMERAS = [
+  "Camera 1",
+  "Camera 2",
+  "Camera 3",
+  "Camera 4",
+];
+
+const TESTS = [
+  "AlphaBlendModeTest",
+  "TextureEncodingTest",
+  "TextureLinearInterpolationTest",
+  "TextureTransformTest",
+];
 
 async function loadSavedCredentialsIfExist() {
   try {
@@ -57,30 +72,6 @@ async function authorize() {
     await saveCredentials(client);
   }
   return client;
-}
-
-async function getRowID(auth, author) {
-  const sheets = google.sheets({version: 'v4', auth});
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${ROUND_ID}!A1:A`,
-  });
-  for (const [i, row] of res.data.values.entries()) {
-    if (row[0] == author) {
-      return i + 1;
-    }
-  }
-  throw `couldn't find ${author}`;
-}
-
-async function findRoundFolder(auth) {
-  const service = google.drive({version: 'v3', auth});
-  const res = await service.files.list({
-    q: `name='${ROUND_ID}' and '${GDRIVE_FOLDER_ID}' in parents`,
-    fields: 'files(id, name)',
-    spaces: "drive",
-  });
-  return res.data.files[0].id;
 }
 
 async function findFile(auth, file_name, folder) {
@@ -149,7 +140,7 @@ async function shareFile(auth, file_id) {
   });
 }
 
-async function updateValues(auth, row_id, time, img_val, stdout) {
+async function updateValues(auth, row_id, time, img_val, stdout, author) {
   console.log("updating cells in the table ...");
   const service = google.sheets({version: 'v4', auth});
   let values = [
@@ -160,7 +151,7 @@ async function updateValues(auth, row_id, time, img_val, stdout) {
   ];
   const result = await service.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `B${row_id}:D${row_id}`,
+    range: `${author}!B${row_id}:D${row_id}`,
     valueInputOption: 'USER_ENTERED',
     resource: {
       values,
@@ -175,23 +166,77 @@ async function readFile(path) {
   return result;
 }
 
-async function main() {
-  if (!args.author) {
-    throw "author is not specified";
+async function checkSheetExists(auth, author) {
+  console.log(`looking for ${author}`)
+  const sheets = google.sheets({version: 'v4', auth});
+  const res = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+  });
+  for (const [i, row] of res.data.sheets.entries()) {
+    if (row.properties.title == author) {
+      return i + 1;
+    }
   }
-  if (!args.zip) {
-    throw "zip path is not specified";
+  throw `couldn't find ${author}`;
+}
+
+async function findRoundFolder(auth) {
+  const service = google.drive({version: 'v3', auth});
+  const res = await service.files.list({
+    q: `name='${ROUND_ID}' and '${GDRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder'`,
+    fields: 'files(id, name)',
+    spaces: "drive",
+  });
+  return res.data.files[0].id;
+}
+
+async function findAuthorFolder(auth, author, round_folder) {
+  const service = google.drive({version: 'v3', auth});
+  const res = await service.files.list({
+    q: `name='${author}' and '${round_folder}' in parents and mimeType='application/vnd.google-apps.folder'`,
+    fields: 'files(id, name)',
+    spaces: "drive",
+  });
+  if (res.data.files.length) {
+    return res.data.files[0].id;
   }
+}
 
-  const auth = await authorize();
-  console.log("successful auth");
+async function getAuthorFolder(auth, author, round_folder) {
+  const id = await findAuthorFolder(auth, author, round_folder);
+  if (id) {
+    return id;
+  }
+  console.log(`creating author folder`);
+  const service = google.drive({version: 'v3', auth});
+  const file = await service.files.create({
+    resource: {
+      mimeType: "application/vnd.google-apps.folder",
+      name: author,
+      parents: [round_folder],
+    },
+    fields: 'id',
+  });
+  return file.data.id;
+}
 
-  const row_id = await getRowID(auth, args.author);
-  console.log(`row_id = ${row_id}`);
+async function getTestRowID(auth, author, test_name) {
+  const sheets = google.sheets({version: 'v4', auth});
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${author}!A1:A`,
+  });
+  for (const [i, row] of res.data.values.entries()) {
+    if (row[0] == test_name) {
+      return i + 1;
+    }
+  }
+  throw `couldn't find ${test_name}`;
+}
 
-  const round_folder = await findRoundFolder(auth);
-  console.log(`round_folder = ${round_folder}`)
-
+async function execTest(auth, camera_name, gltf_path, test_name, author_folder, author)
+{
+  const row_id = await getTestRowID(auth, author, test_name)
   const tmp_unpacked_dir = path.join(TMP_DIR, "zip_unpacked");
   const out_png = path.join(TMP_DIR, "output.png");
   const out_txt = path.join(TMP_DIR, "output.txt");
@@ -204,23 +249,28 @@ async function main() {
 
   const txt_file = await fs.open(out_txt, 'w');
   const start = process.hrtime();
-  const res = spawnSync(exe, ["--in", GLTF_PATH, "--out", out_png, "--height", 1080], {
+  const res = spawnSync(exe, [
+    "--in", gltf_path,
+    "--out", out_png,
+    "--height", 1080,
+    "--camera", camera_name,
+    "--ambient", "FFFFFF",
+  ], {
     stdio: [null, txt_file, txt_file],
     cwd: tmp_unpacked_dir,
     timeout: TIMEOUT,
   });
-  console.log(res);
+  console.log(`status = ${res.status}`);
   const duration = process.hrtime(start);
   await txt_file.close();
 
   const time = pretty(duration, 'ms');
   console.log(`time = ${time}`);
   var stdout = await readFile(out_txt)
-  console.log(`${stdout}`);
+  // console.log(`${stdout}`);
 
-  const img_id = await uploadFile(auth, `${args.author}.png`, out_png, round_folder, 'image/png');
-  const zip_id = await uploadFile(auth, `${args.author}.zip`, args.zip, round_folder, 'application/zip');
-  const txt_id = await uploadFile(auth, `${args.author}.txt`, out_txt, round_folder, 'text/plain');
+  const img_id = await uploadFile(auth, `${test_name}.png`, out_png, author_folder, 'image/png');
+  const txt_id = await uploadFile(auth, `${test_name}.txt`, out_txt, author_folder, 'text/plain');
 
   var img_val = null;
   if (img_id) {
@@ -236,7 +286,39 @@ async function main() {
     stdout = `https://drive.google.com/file/d/${txt_id}/view?usp=drive_link`;
   }
 
-  await updateValues(auth, row_id, time, img_val, stdout);
+  await updateValues(auth, row_id, time, img_val, stdout, author);
+}
+
+async function main() {
+  if (!args.author) {
+    throw "author is not specified";
+  }
+  if (!args.zip) {
+    throw "zip path is not specified";
+  }
+
+  const auth = await authorize();
+  console.log("successful auth");
+
+  const sheet_num = await checkSheetExists(auth, args.author);
+  console.log(`sheet_num = ${sheet_num}`);
+
+  const round_folder = await findRoundFolder(auth);
+  console.log(`round_folder = ${round_folder}`)
+
+  const author_folder = await getAuthorFolder(auth, args.author, round_folder);
+  console.log(`author_folder = ${author_folder}`)
+
+  for (const test of TESTS) {
+    const test_path = `${TESTS_PATH}\\${test}\\${test}.gltf`;
+    await execTest(auth, "Camera.001", test_path, test, author_folder, args.author);
+  }
+
+  for (const camera of CAMERAS) {
+    await execTest(auth, camera, GLTF_PATH, camera, author_folder, args.author);
+  }
+
+  const zip_id = await uploadFile(auth, `app.zip`, args.zip, author_folder, 'application/zip');
 
   console.log("DONE!");
 }
