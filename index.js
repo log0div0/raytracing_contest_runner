@@ -121,6 +121,13 @@ async function uploadFile(auth, file_name, src_file_path, folder, mime) {
 
 async function findExePath(dir) {
   const files = await fs.readdir(dir);
+  if (files.length == 1) {
+    const new_path = path.join(dir, files[0]);
+    const stat = await fs.stat(new_path);
+    if (stat.isDirectory()) {
+      return findExePath(new_path)
+    }
+  }
   for (const file of files) {
     if (path.extname(file) == '.exe') {
       return path.join(dir, file);
@@ -257,7 +264,7 @@ async function execTest(auth, camera_name, gltf_path, test_name, author_folder, 
     "--ambient", "FFFFFF",
   ], {
     stdio: [null, txt_file, txt_file],
-    cwd: tmp_unpacked_dir,
+    cwd: path.dirname(exe),
     timeout: TIMEOUT,
   });
   console.log(`status = ${res.status}`);
